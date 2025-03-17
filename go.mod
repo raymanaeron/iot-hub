@@ -1,4 +1,4 @@
-module zigbee2mqtt-api
+module iothub
 
 go 1.21.6
 
