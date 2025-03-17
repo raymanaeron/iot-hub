@@ -11,24 +11,25 @@ import (
 	"sync"
 )
 
-// DeviceState represents a WiFi IoT device
-type DeviceState struct {
-	IP    string                 `json:"ip"`
-	Mac   string                 `json:"mac"`
-	State map[string]interface{} `json:"state,omitempty"`
+// **WiFiDevice represents all available properties of a WiFi IoT device**
+type WiFiDevice struct {
+	IP       string                 `json:"ip"`
+	MAC      string                 `json:"mac"`
+	Hostname string                 `json:"hostname,omitempty"`
+	Extra    map[string]interface{} `json:"extra,omitempty"`
 }
 
 var (
-	deviceStates = make(map[string]DeviceState) // Stores discovered WiFi devices
-	mu           sync.Mutex                     // Mutex for safe concurrent access
+	deviceStates = make(map[string]WiFiDevice) // Stores discovered WiFi devices
+	mu           sync.Mutex                    // Mutex for concurrency
 )
 
 // **Scan for WiFi devices (Using `arp -a`)**
-func ScanDevices() map[string]DeviceState {
+func ScanDevices() map[string]WiFiDevice {
 	mu.Lock()
 	defer mu.Unlock()
 
-	devices := make(map[string]DeviceState)
+	devices := make(map[string]WiFiDevice)
 
 	// Run `arp -a` to list network devices
 	cmd := exec.Command("arp", "-a")
@@ -40,15 +41,23 @@ func ScanDevices() map[string]DeviceState {
 
 	lines := strings.Split(string(output), "\n")
 
-	// Regex pattern to extract IP & MAC addresses from arp output
-	re := regexp.MustCompile(`\((\d+\.\d+\.\d+\.\d+)\)\s+at\s+([0-9a-fA-F:-]+)`)
+	// Regex pattern to extract IP, MAC, and hostname
+	re := regexp.MustCompile(`(?P<hostname>\S+)?\s+\((?P<ip>\d+\.\d+\.\d+\.\d+)\)\s+at\s+(?P<mac>[0-9a-fA-F:-]+)`)
 
 	for _, line := range lines {
 		match := re.FindStringSubmatch(line)
-		if len(match) == 3 {
-			ip := match[1]  // Extract IP address
-			mac := match[2] // Extract MAC address
-			devices[ip] = DeviceState{IP: ip, Mac: mac}
+		if len(match) >= 4 {
+			ip := match[2]
+			mac := match[3]
+			hostname := match[1]
+
+			// Store full device data
+			devices[ip] = WiFiDevice{
+				IP:       ip,
+				MAC:      mac,
+				Hostname: hostname,
+				Extra:    map[string]interface{}{}, // Placeholder for additional properties
+			}
 		}
 	}
 
@@ -57,7 +66,7 @@ func ScanDevices() map[string]DeviceState {
 }
 
 // **Get all known WiFi devices**
-func GetDevices() map[string]DeviceState {
+func GetDevices() map[string]WiFiDevice {
 	mu.Lock()
 	defer mu.Unlock()
 	return deviceStates
@@ -70,7 +79,7 @@ func SendCommand(ip string, command map[string]interface{}) error {
 		return fmt.Errorf("failed to encode command: %v", err)
 	}
 
-	url := fmt.Sprintf("http://%s/api", ip) // Assuming WiFi device has an HTTP API
+	url := fmt.Sprintf("http://%s/api", ip) // Assuming the WiFi device has an HTTP API
 	resp, err := http.Post(url, "application/json", strings.NewReader(string(jsonData)))
 	if err != nil {
 		return fmt.Errorf("failed to send command to device %s: %v", ip, err)
