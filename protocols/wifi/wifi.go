@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 )
@@ -18,8 +19,8 @@ type DeviceState struct {
 }
 
 var (
-	deviceStates = make(map[string]DeviceState) // Stores WiFi devices
-	mu           sync.Mutex                     // Mutex for concurrency
+	deviceStates = make(map[string]DeviceState) // Stores discovered WiFi devices
+	mu           sync.Mutex                     // Mutex for safe concurrent access
 )
 
 // **Scan for WiFi devices (Using `arp -a`)**
@@ -29,6 +30,7 @@ func ScanDevices() map[string]DeviceState {
 
 	devices := make(map[string]DeviceState)
 
+	// Run `arp -a` to list network devices
 	cmd := exec.Command("arp", "-a")
 	output, err := cmd.Output()
 	if err != nil {
@@ -37,11 +39,15 @@ func ScanDevices() map[string]DeviceState {
 	}
 
 	lines := strings.Split(string(output), "\n")
+
+	// Regex pattern to extract IP & MAC addresses from arp output
+	re := regexp.MustCompile(`\((\d+\.\d+\.\d+\.\d+)\)\s+at\s+([0-9a-fA-F:-]+)`)
+
 	for _, line := range lines {
-		fields := strings.Fields(line)
-		if len(fields) >= 2 {
-			ip := strings.Trim(fields[0], "()")
-			mac := fields[1]
+		match := re.FindStringSubmatch(line)
+		if len(match) == 3 {
+			ip := match[1]  // Extract IP address
+			mac := match[2] // Extract MAC address
 			devices[ip] = DeviceState{IP: ip, Mac: mac}
 		}
 	}
@@ -61,13 +67,13 @@ func GetDevices() map[string]DeviceState {
 func SendCommand(ip string, command map[string]interface{}) error {
 	jsonData, err := json.Marshal(command)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to encode command: %v", err)
 	}
 
-	url := fmt.Sprintf("http://%s/api", ip) // Assuming the WiFi device uses an HTTP API
+	url := fmt.Sprintf("http://%s/api", ip) // Assuming WiFi device has an HTTP API
 	resp, err := http.Post(url, "application/json", strings.NewReader(string(jsonData)))
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to send command to device %s: %v", ip, err)
 	}
 	defer resp.Body.Close()
 
